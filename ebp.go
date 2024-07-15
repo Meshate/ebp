@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -23,21 +22,22 @@ type Parser interface {
 }
 
 type ethParser struct {
-	currentBlock atomic.Int64
 	subscribeMap RwMap[string, *blockInfo]
 	client       http.Client
 }
 
-func NewParser() Parser {
+// NewParser returns the Parser interface
+// The subscribed data isn't the latest version. You can adjust the interval time to make the data closer to the latest.
+func NewParser(interval time.Duration) Parser {
 	p := &ethParser{
-		currentBlock: atomic.Int64{},
 		subscribeMap: NewRwMap[string, *blockInfo](),
 		client:       http.Client{Timeout: 30 * time.Second},
 	}
-	go p.loop(10 * time.Second)
+	go p.loop(interval)
 	return p
 }
 
+// loop will background update subscribed address.
 func (p *ethParser) loop(t time.Duration) {
 	log.Println("INFO", "started background subscribe address update")
 	ticker := time.NewTicker(t)
@@ -57,6 +57,7 @@ func (p *ethParser) loop(t time.Duration) {
 	}
 }
 
+// GetCurrentBlock returns the latest block id in the blockchain.
 func (p *ethParser) GetCurrentBlock() int {
 	resp, err := p.sendRequest(blockNumber, []interface{}{})
 	if err != nil {
@@ -77,6 +78,8 @@ func (p *ethParser) GetCurrentBlock() int {
 	return int(value)
 }
 
+// Subscribe the address, will update the subscribed address in the loop function.
+// return false if the address is already subscribed or get the block info failed.
 func (p *ethParser) Subscribe(address string) bool {
 	if _, exist := p.subscribeMap.Get(address); exist {
 		return false
@@ -88,6 +91,7 @@ func (p *ethParser) Subscribe(address string) bool {
 	return true
 }
 
+// updateAddress will get the latest block info of the address.
 func (p *ethParser) updateAddress(address string) error {
 	resp, err := p.sendRequest(getBlockByHash, []interface{}{address, false})
 	if err != nil {
@@ -110,6 +114,8 @@ func (p *ethParser) updateAddress(address string) error {
 	return nil
 }
 
+// GetTransactions will get all transaction infos of the address.
+// If the address is not in the subscribe list, GetTransactions will return an empty list.
 func (p *ethParser) GetTransactions(address string) []Transaction {
 	if block, exist := p.subscribeMap.Get(address); !exist {
 		return []Transaction{}
